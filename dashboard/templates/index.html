@@ -1,0 +1,878 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>태양 전파 관측 시스템</title>
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/luxon@3.4.4/build/global/luxon.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@1.3.1/dist/chartjs-adapter-luxon.umd.min.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display','Helvetica Neue',sans-serif;
+  background:#f2f2f7;color:#1c1c1e;height:100vh;overflow:hidden;
+}
+
+/* ── Header ── */
+.hdr{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:13px 20px 11px;
+  background:#fff;
+  border-bottom:.5px solid rgba(0,0,0,.1);
+}
+.hdr-l{display:flex;align-items:center;gap:11px}
+.hdr-title{font-size:16px;font-weight:600;letter-spacing:-.3px;color:#1c1c1e}
+.hdr-time{font-size:12px;color:#8e8e93;font-variant-numeric:tabular-nums}
+.hdr-r{display:flex;align-items:center;gap:8px}
+
+/* ── Control buttons ── */
+.ctrl-btn{
+  font-size:12px;font-weight:600;
+  padding:6px 13px;border-radius:9px;
+  border:none;cursor:pointer;
+  transition:background .18s,opacity .18s,transform .1s;
+  font-family:inherit;letter-spacing:-.1px;
+}
+.ctrl-btn:active{transform:scale(.96)}
+.ctrl-start{background:#34C759;color:#fff}
+.ctrl-start:hover:not(:disabled){background:#2db84d}
+.ctrl-stop{background:#FF3B30;color:#fff}
+.ctrl-stop:hover:not(:disabled){background:#e5352b}
+.ctrl-btn:disabled{opacity:.35;cursor:not-allowed}
+
+/* ── Grid ── */
+.grid{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  grid-template-rows:1fr 1fr;
+  gap:10px;
+  padding:10px 14px 14px;
+  height:calc(100vh - 50px);
+}
+
+/* ── Card ── */
+.card{
+  background:#fff;
+  border:.5px solid rgba(0,0,0,.08);
+  border-radius:16px;
+  box-shadow:0 1px 3px rgba(0,0,0,.06),0 4px 12px rgba(0,0,0,.04);
+  display:flex;flex-direction:column;overflow:hidden;
+}
+.card-hdr{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:12px 14px 9px;
+  border-bottom:.5px solid rgba(0,0,0,.06);
+  flex-shrink:0;
+}
+.card-title{
+  font-size:12px;font-weight:600;color:#1c1c1e;
+  letter-spacing:.1px;display:flex;align-items:center;gap:6px;
+}
+.card-body{flex:1;overflow:hidden;position:relative}
+
+/* ── Badges ── */
+.badge{font-size:10px;padding:2px 8px;border-radius:10px;font-weight:500}
+.b-blue {background:rgba(0,122,255,.12);color:#007AFF}
+.b-green{background:rgba(52,199,89,.12);color:#34C759}
+.b-red  {background:rgba(255,59,48,.12);color:#FF3B30}
+.b-gray {background:rgba(142,142,147,.12);color:#8E8E93}
+
+/* ── Chart ── */
+.chart-wrap{padding:6px 10px 10px;height:100%}
+
+/* ── Figure ── */
+.fig-wrap{
+  height:100%;display:flex;align-items:center;justify-content:center;padding:8px;
+}
+.fig-wrap img{max-width:100%;max-height:100%;object-fit:contain;border-radius:6px}
+.fig-empty{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:8px;color:rgba(0,0,0,.2);font-size:12px;
+}
+.fig-empty-icon{font-size:30px;opacity:.3}
+
+/* ── Log ── */
+.log-wrap{overflow-y:auto;height:100%;padding:2px 0}
+.log-wrap::-webkit-scrollbar{width:3px}
+.log-wrap::-webkit-scrollbar-thumb{background:rgba(0,0,0,.12);border-radius:2px}
+.log-row{
+  display:grid;grid-template-columns:108px 1fr auto;
+  align-items:center;padding:6px 14px;gap:6px;
+  border-bottom:.5px solid rgba(0,0,0,.04);
+  transition:background .1s;
+}
+.log-row:hover{background:rgba(0,0,0,.02)}
+.log-row.burst{background:rgba(255,59,48,.04)}
+.log-time{font-size:11px;color:#8e8e93;font-family:'SF Mono',Menlo,monospace;font-variant-numeric:tabular-nums}
+.log-coh{font-size:12px;font-weight:500;font-variant-numeric:tabular-nums}
+.log-tag{font-size:10px;padding:2px 7px;border-radius:8px;font-weight:500}
+.tag-burst{background:rgba(255,59,48,.12);color:#FF3B30}
+.tag-ok   {background:rgba(142,142,147,.1);color:#8E8E93}
+
+/* ── Control Center ── */
+.cc{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  grid-template-rows:1fr 1.15fr 1fr;
+  gap:9px;padding:10px 12px 12px;height:100%;
+}
+.cc-tile{
+  background:#e5e5ea;border-radius:18px;
+  display:flex;flex-direction:column;
+  align-items:flex-start;justify-content:space-between;
+  padding:13px 13px 11px;
+  transition:background .22s,box-shadow .22s;
+  user-select:none;
+}
+.cc-tile.cc-wide{
+  grid-column:span 2;
+  flex-direction:row;align-items:center;
+  padding:14px 18px;gap:16px;
+}
+/* active states */
+.cc-tile.on-green{background:#34C759}
+.cc-tile.on-blue {background:#007AFF}
+.cc-tile.on-red  {background:#FF3B30;box-shadow:0 0 18px rgba(255,59,48,.28)}
+
+/* icon circle */
+.cc-ico{
+  width:42px;height:42px;border-radius:50%;
+  background:rgba(0,0,0,.1);
+  display:flex;align-items:center;justify-content:center;
+  transition:background .22s;
+  flex-shrink:0;
+}
+.cc-tile.on-green .cc-ico,
+.cc-tile.on-blue  .cc-ico,
+.cc-tile.on-red   .cc-ico{background:rgba(255,255,255,.25)}
+.cc-ico svg{width:22px;height:22px;transition:color .22s;color:#3c3c43}
+.cc-tile.on-green .cc-ico svg,
+.cc-tile.on-blue  .cc-ico svg,
+.cc-tile.on-red   .cc-ico svg{color:#fff}
+
+/* bottom text group */
+.cc-txt{display:flex;flex-direction:column;gap:2px}
+.cc-name{font-size:13px;font-weight:600;color:#1c1c1e;line-height:1.3;transition:color .22s}
+.cc-sub {font-size:11px;font-weight:500;color:#8e8e93;line-height:1.3;transition:color .22s}
+.cc-tile.on-green .cc-name,.cc-tile.on-blue .cc-name,.cc-tile.on-red .cc-name{color:#fff}
+.cc-tile.on-green .cc-sub ,.cc-tile.on-blue .cc-sub ,.cc-tile.on-red .cc-sub {color:rgba(255,255,255,.75)}
+
+/* burst wide tile */
+.cc-burst-ico{
+  width:48px;height:48px;border-radius:50%;
+  background:rgba(0,0,0,.1);
+  display:flex;align-items:center;justify-content:center;
+  flex-shrink:0;transition:background .22s;
+  position:relative;
+}
+.cc-tile.on-red .cc-burst-ico{background:rgba(255,255,255,.22)}
+.cc-burst-ico svg{width:24px;height:24px;color:#3c3c43;transition:color .22s}
+.cc-tile.on-red .cc-burst-ico svg{color:#fff}
+.cc-burst-ring{
+  position:absolute;inset:-4px;border-radius:50%;
+  border:2px solid transparent;
+  transition:border-color .3s;
+}
+.cc-tile.on-red .cc-burst-ring{
+  border-color:rgba(255,255,255,.4);
+  animation:ringpulse 1.6s ease-in-out infinite;
+}
+@keyframes ringpulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.3;transform:scale(1.15)}}
+.cc-burst-body{flex:1;display:flex;flex-direction:column;gap:4px}
+.cc-burst-label{font-size:11px;font-weight:500;color:#8e8e93;transition:color .22s}
+.cc-burst-val  {font-size:18px;font-weight:700;color:#1c1c1e;line-height:1.2;transition:color .22s}
+.cc-tile.on-red .cc-burst-label{color:rgba(255,255,255,.75)}
+.cc-tile.on-red .cc-burst-val  {color:#fff}
+
+/* disk ring */
+.cc-ring-wrap{position:relative;width:42px;height:42px;flex-shrink:0}
+.cc-ring-wrap svg{transform:rotate(-90deg)}
+.cc-ring-pct{
+  position:absolute;inset:0;
+  display:flex;align-items:center;justify-content:center;
+  font-size:10px;font-weight:700;color:#3c3c43;
+  font-variant-numeric:tabular-nums;transition:color .22s;
+}
+.cc-tile.on-red .cc-ring-pct{color:#fff}
+
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.5;transform:scale(1.35)}}
+
+/* Live dot */
+.live{width:6px;height:6px;border-radius:50%;background:#34C759;animation:blink 2s ease-in-out infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.25}}
+
+/* Coherence value */
+.coh-val{font-size:20px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:-.5px;transition:color .3s}
+
+/* ── Tab buttons (우상단 카드) ── */
+.tab-btn{
+  font-size:11px;font-weight:600;
+  padding:3px 9px;border-radius:7px;border:none;
+  cursor:pointer;background:transparent;color:#8e8e93;
+  font-family:inherit;transition:background .15s,color .15s;
+}
+.tab-btn.tab-on{background:rgba(0,122,255,.12);color:#007AFF}
+
+/* ── Spectrum chart wrap ── */
+.spec-wrap{
+  position:relative;height:100%;padding:6px 10px 10px;
+}
+.spec-busy{
+  position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  background:rgba(255,255,255,.7);backdrop-filter:blur(4px);
+  font-size:12px;color:#8e8e93;border-radius:0 0 16px 16px;
+  pointer-events:none;
+}
+
+/* ── Toast ── */
+.toast-wrap{position:fixed;top:62px;right:14px;z-index:999;display:flex;flex-direction:column;gap:7px}
+.toast{
+  background:rgba(255,255,255,.97);border:.5px solid rgba(255,59,48,.25);
+  border-radius:14px;padding:11px 15px;min-width:270px;
+  backdrop-filter:blur(24px);display:flex;align-items:center;gap:11px;
+  animation:tin .28s ease,tout .28s ease 4.7s forwards;
+  box-shadow:0 4px 20px rgba(0,0,0,.12);
+}
+@keyframes tin {from{transform:translateX(110%);opacity:0}to{transform:none;opacity:1}}
+@keyframes tout{from{transform:none;opacity:1}to{transform:translateX(110%);opacity:0}}
+.toast-ico{font-size:19px}
+.toast-t{font-size:13px;font-weight:600;color:#FF3B30}
+.toast-b{font-size:11px;color:#8e8e93;margin-top:1px}
+
+/* ── Password Modal ── */
+.modal-backdrop{
+  position:fixed;inset:0;background:rgba(0,0,0,.45);
+  z-index:1000;display:flex;align-items:center;justify-content:center;
+  backdrop-filter:blur(6px);
+}
+.modal-box{
+  background:#fff;border-radius:20px;padding:28px 24px 20px;
+  width:300px;box-shadow:0 20px 60px rgba(0,0,0,.3);
+  animation:minup .22s cubic-bezier(.34,1.56,.64,1);
+}
+@keyframes minup{from{transform:scale(.88);opacity:0}to{transform:none;opacity:1}}
+.modal-title{font-size:17px;font-weight:700;color:#1c1c1e;margin-bottom:4px}
+.modal-sub{font-size:13px;color:#8e8e93;margin-bottom:16px}
+.pw-input{
+  width:100%;padding:11px 13px;border-radius:10px;
+  border:1.5px solid rgba(0,0,0,.12);font-size:15px;
+  outline:none;font-family:inherit;
+  transition:border-color .2s;
+  -webkit-text-security:disc;
+}
+.pw-input:focus{border-color:#007AFF}
+.pw-input.err{border-color:#FF3B30;animation:shake .3s ease}
+@keyframes shake{0%,100%{transform:none}25%{transform:translateX(-5px)}75%{transform:translateX(5px)}}
+.pw-err{font-size:12px;color:#FF3B30;margin-top:6px;min-height:16px}
+.modal-btns{display:flex;gap:8px;margin-top:18px}
+.modal-btn{
+  flex:1;padding:11px;border-radius:10px;border:none;
+  font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;
+  transition:background .15s,opacity .15s;
+}
+.modal-btn.cancel{background:#f2f2f7;color:#1c1c1e}
+.modal-btn.cancel:hover{background:#e5e5ea}
+.modal-btn.confirm{background:#007AFF;color:#fff}
+.modal-btn.confirm:hover{background:#0066d6}
+.modal-btn:disabled{opacity:.5;cursor:not-allowed}
+</style>
+</head>
+<body>
+
+<div class="hdr">
+  <div class="hdr-l">
+    <div class="hdr-title">태양 전파 관측 시스템</div>
+  </div>
+  <div class="hdr-r">
+    <button id="btn-start" class="ctrl-btn ctrl-start" onclick="openModal('start')" disabled>측정 시작</button>
+    <button id="btn-stop" class="ctrl-btn ctrl-stop" onclick="openModal('stop')" disabled>측정 정지</button>
+    <div id="clock" class="hdr-time">--:--:-- UTC</div>
+  </div>
+</div>
+
+<div class="grid">
+
+  <!-- 좌상: 코히어런스 차트 -->
+  <div class="card">
+    <div class="card-hdr">
+      <div class="card-title">
+        <div class="live"></div>코히어런스
+      </div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <span id="last-ts" style="font-size:10px;color:#8e8e93;font-weight:500;margin-right:4px">—</span><span class="coh-val" id="coh-now">—</span>
+        <span class="badge b-gray" id="chart-badge">대기중</span>
+      </div>
+    </div>
+    <div class="card-body">
+      <div class="chart-wrap"><canvas id="chart"></canvas></div>
+    </div>
+  </div>
+
+  <!-- 우상: 분석 그래프 / 실시간 스펙트럼 탭 -->
+  <div class="card">
+    <div class="card-hdr">
+      <div style="display:flex;align-items:center;gap:4px">
+        <button class="tab-btn" id="tab-fig-btn" onclick="switchTab('fig')">분석 그래프</button>
+        <button class="tab-btn tab-on" id="tab-spec-btn" onclick="switchTab('spec')">실시간 스펙트럼</button>
+      </div>
+      <span class="badge b-gray" id="fig-badge">대기중</span>
+    </div>
+    <div class="card-body">
+      <div class="fig-wrap" id="panel-fig" style="display:none">
+        <div class="fig-empty">
+          <div>버스트 감지 시 그래프 표시</div>
+        </div>
+      </div>
+      <div id="panel-spec" style="height:100%">
+        <div class="spec-wrap">
+          <canvas id="spec-chart"></canvas>
+          <div class="spec-busy" id="spec-busy" style="display:none">측정 시작 후 스펙트럼이 표시됩니다</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 좌하: 관측 로그 -->
+  <div class="card">
+    <div class="card-hdr">
+      <div class="card-title">관측 로그</div>
+      <div style="display:flex;align-items:center;gap:6px">
+        <button onclick="downloadCSV()" style="font-size:10px;font-weight:600;padding:2px 9px;border-radius:7px;border:none;cursor:pointer;background:rgba(0,122,255,.12);color:#007AFF;font-family:inherit;">CSV ↓</button>
+        <span class="badge b-gray" id="log-cnt">0 건</span>
+      </div>
+    </div>
+    <div class="card-body">
+      <div class="log-wrap" id="log-wrap">
+        <div style="padding:18px 14px;color:rgba(0,0,0,.2);font-size:12px;text-align:center">
+          관측 데이터 대기중...
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 우하: 시스템 상태 (Control Center) -->
+  <div class="card">
+    <div class="card-hdr">
+      <div class="card-title">시스템 상태</div>
+      <span class="badge b-gray" id="sys-badge">확인중</span>
+    </div>
+    <div class="card-body">
+      <div class="cc">
+
+        <!-- SDR 1 -->
+        <div class="cc-tile" id="cc-sdr1">
+          <div class="cc-ico">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+              <circle cx="12" cy="17" r="2" fill="currentColor" stroke="none"/>
+              <path d="M8.5 13.5a5 5 0 0 1 7 0"/>
+              <path d="M5 10a10 10 0 0 1 14 0"/>
+            </svg>
+          </div>
+          <div class="cc-txt">
+            <div class="cc-name">SDR 1</div>
+            <div class="cc-sub" id="cc-sdr1-sub">미연결</div>
+          </div>
+        </div>
+
+        <!-- SDR 2 -->
+        <div class="cc-tile" id="cc-sdr2">
+          <div class="cc-ico">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+              <circle cx="12" cy="17" r="2" fill="currentColor" stroke="none"/>
+              <path d="M8.5 13.5a5 5 0 0 1 7 0"/>
+              <path d="M5 10a10 10 0 0 1 14 0"/>
+            </svg>
+          </div>
+          <div class="cc-txt">
+            <div class="cc-name">SDR 2</div>
+            <div class="cc-sub" id="cc-sdr2-sub">미연결</div>
+          </div>
+        </div>
+
+        <!-- 버스트 (wide) -->
+        <div class="cc-tile cc-wide" id="cc-burst">
+          <div class="cc-burst-ico">
+            <div class="cc-burst-ring"></div>
+            <svg viewBox="0 0 24 24" fill="currentColor">
+              <path d="M13 2L4.5 13.5H11L9.5 22L20 10H13.5L13 2Z"/>
+            </svg>
+          </div>
+          <div class="cc-burst-body">
+            <div class="cc-burst-label">버스트 상태</div>
+            <div class="cc-burst-val" id="cc-btxt">발생 안함</div>
+          </div>
+        </div>
+
+        <!-- 측정 상태 -->
+        <div class="cc-tile" id="cc-rec">
+          <div class="cc-ico">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+              <circle cx="12" cy="12" r="3" fill="currentColor" stroke="none" id="cc-rec-dot"/>
+              <circle cx="12" cy="12" r="7"/>
+            </svg>
+          </div>
+          <div class="cc-txt">
+            <div class="cc-name">측정 상태</div>
+            <div class="cc-sub" id="cc-rec-sub">대기중</div>
+          </div>
+        </div>
+
+        <!-- 저장 공간 -->
+        <div class="cc-tile" id="cc-disk">
+          <div class="cc-ring-wrap">
+            <svg width="42" height="42" viewBox="0 0 42 42">
+              <circle cx="21" cy="21" r="17" fill="none" stroke="rgba(0,0,0,.1)" stroke-width="3.5"/>
+              <circle cx="21" cy="21" r="17" fill="none" stroke="#34C759" stroke-width="3.5"
+                stroke-dasharray="106.8" stroke-dashoffset="106.8" stroke-linecap="round"
+                id="cc-disk-arc" style="transition:stroke-dashoffset .5s,stroke .4s"/>
+            </svg>
+            <div class="cc-ring-pct" id="cc-disk-pct">—</div>
+          </div>
+          <div class="cc-txt">
+            <div class="cc-name">저장 공간</div>
+            <div class="cc-sub" id="cc-disk-sub">—</div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="toast-wrap" id="toasts"></div>
+
+<!-- Password Modal -->
+<div id="pw-modal" class="modal-backdrop" style="display:none">
+  <div class="modal-box">
+    <div class="modal-title" id="modal-title">측정 시작</div>
+    <div class="modal-sub" id="modal-sub">비밀번호를 입력하세요</div>
+    <input type="password" id="pw-input" class="pw-input" placeholder="비밀번호">
+    <div id="pw-err" class="pw-err"></div>
+    <div class="modal-btns">
+      <button class="modal-btn cancel" onclick="closeModal()">취소</button>
+      <button class="modal-btn confirm" id="modal-confirm" onclick="submitControl()">확인</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const socket = io();
+
+/* ── Chart setup ─────────────────────────────── */
+const ctx = document.getElementById('chart').getContext('2d');
+
+function parseTs(ts) {
+  const m = ts && ts.match(/(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})/);
+  if (!m) return Date.now();
+  return Date.UTC(+m[1], +m[2]-1, +m[3], +m[4], +m[5], +m[6]);
+}
+
+const chartData = {
+  datasets:[{
+    data:[],   // {x: utcMs, y: coherence}
+    borderColor:'#007AFF',
+    backgroundColor:(c)=>{
+      const g=c.chart.ctx.createLinearGradient(0,0,0,c.chart.height);
+      g.addColorStop(0,'rgba(0,122,255,.18)');
+      g.addColorStop(1,'rgba(0,122,255,0)');
+      return g;
+    },
+    borderWidth:1.5,
+    pointRadius:(c)=>c.raw>0.2?4:2,
+    pointBackgroundColor:(c)=>c.raw>0.2?'#FF453A':'#007AFF',
+    pointBorderWidth:0,
+    fill:true,tension:.3
+  }]
+};
+
+const threshPlugin={
+  id:'thresh',
+  afterDraw(ch){
+    const{ctx:c,chartArea:{left,right},scales:{y}}=ch;
+    if(!y)return;
+    const yp=y.getPixelForValue(.2);
+    c.save();c.beginPath();
+    c.moveTo(left,yp);c.lineTo(right,yp);
+    c.strokeStyle='rgba(255,69,58,.45)';c.lineWidth=1;
+    c.setLineDash([4,4]);c.stroke();c.restore();
+  }
+};
+Chart.register(threshPlugin);
+
+const chart=new Chart(ctx,{
+  type:'line',data:chartData,
+  options:{
+    responsive:true,maintainAspectRatio:false,animation:{duration:280},
+    plugins:{
+      legend:{display:false},
+      tooltip:{
+        backgroundColor:'rgba(255,255,255,.97)',borderColor:'rgba(0,0,0,.08)',
+        borderWidth:.5,titleColor:'#8e8e93',bodyColor:'#1c1c1e',
+        padding:9,
+        callbacks:{label:c=>`코히어런스: ${c.raw.toFixed(4)}${c.raw>.2?' ⚡ 버스트':''}`}
+      }
+    },
+    scales:{
+      x:{
+        type:'time',
+        time:{displayFormats:{minute:'HH:mm',hour:'HH:mm'},tooltipFormat:'MM/dd HH:mm'},
+        adapters:{date:{zone:'UTC'}},
+        grid:{color:'rgba(0,0,0,.05)'},
+        ticks:{color:'#8e8e93',font:{size:9},maxRotation:0,source:'data'}
+      },
+      y:{min:0,max:1,grid:{color:'rgba(0,0,0,.05)'},ticks:{color:'#8e8e93',font:{size:9},stepSize:.2}}
+    }
+  }
+});
+
+/* ── Helpers ─────────────────────────────────── */
+function trimToOneHour() {
+  const cutoff = Date.now() - 60 * 60 * 1000;
+  const d = chartData.datasets[0].data;
+  while (d.length > 0 && d[0].x < cutoff) d.shift();
+}
+
+function addPoint(e, redraw){
+  chartData.datasets[0].data.push({x: parseTs(e.timestamp), y: e.coherence});
+  trimToOneHour();
+  if(redraw)chart.update();
+  const v=e.coherence;
+  const el=document.getElementById('coh-now');
+  el.textContent=v.toFixed(4);
+  el.style.color=v>.2?'#FF3B30':v>.1?'#FF9500':'#1c1c1e';
+  const b=document.getElementById('chart-badge');
+  b.textContent=v>.2?'버스트':'정상';
+  b.className='badge '+(v>.2?'b-red':'b-blue');
+}
+
+function addLog(e, prepend){
+  const w=document.getElementById('log-wrap');
+  const ph=w.querySelector('div[style]');
+  if(ph)ph.remove();
+  const row=document.createElement('div');
+  row.className='log-row'+(e.burst?' burst':'');
+  const t=e.display||e.timestamp.replace(/(\d{4})(\d\d)(\d\d)_(\d\d)(\d\d)(\d\d)/,'$2/$3 $4:$5');
+  const cc=e.coherence>.2?'#FF3B30':e.coherence>.1?'#FF9500':'#1c1c1e';
+  row.innerHTML=`<span class="log-time">${t}</span>
+<span class="log-coh" style="color:${cc}">${e.coherence.toFixed(4)}</span>
+<span class="log-tag ${e.burst?'tag-burst':'tag-ok'}">${e.burst?'버스트':'정상'}</span>`;
+  if(prepend){w.insertBefore(row,w.firstChild);}
+  else w.appendChild(row);
+  document.getElementById('log-cnt').textContent=w.querySelectorAll('.log-row').length+' 건';
+}
+
+function setFigure(fn){
+  document.getElementById('panel-fig').innerHTML=
+    `<img src="/api/figure/${fn}" alt="분석 그래프" style="max-width:100%;max-height:100%;object-fit:contain;border-radius:6px;padding:8px">`;
+  const b=document.getElementById('fig-badge');
+  b.textContent=fn.replace('analysis_','').replace('.png','')
+    .replace(/(\d{4})(\d\d)(\d\d)_(\d\d)(\d\d)(\d\d)/,'$2/$3 $4:$5');
+  b.className='badge b-green';
+}
+
+function setStatus(d){
+  // SDR 1
+  document.getElementById('cc-sdr1').className='cc-tile'+(d.sdr1?' on-green':'');
+  document.getElementById('cc-sdr1-sub').textContent=d.sdr1?'연결됨':'미연결';
+  // SDR 2
+  document.getElementById('cc-sdr2').className='cc-tile'+(d.sdr2?' on-green':'');
+  document.getElementById('cc-sdr2-sub').textContent=d.sdr2?'연결됨':'미연결';
+  // 버스트
+  const burst=d.burst_active;
+  document.getElementById('cc-burst').className='cc-tile cc-wide'+(burst?' on-red':'');
+  document.getElementById('cc-btxt').textContent=burst?'버스트 발생':'발생 안함';
+  // 측정 상태
+  const tr=document.getElementById('cc-rec');
+  const rs=document.getElementById('cc-rec-sub');
+  const svc=d.service_active||false;
+  if(svc||d.recording){rs.textContent='측정중';tr.className='cc-tile on-green';}
+  else if(d.analyzing){rs.textContent='분석중';tr.className='cc-tile on-blue';}
+  else{rs.textContent='대기중';tr.className='cc-tile';}
+  // 시작/정지 버튼 상태
+  document.getElementById('btn-start').disabled = svc;
+  document.getElementById('btn-stop').disabled  = !svc;
+  // 디스크 링
+  const pct=d.disk_percent||0;
+  const arc=document.getElementById('cc-disk-arc');
+  arc.style.strokeDashoffset=106.8*(1-pct/100);
+  arc.style.stroke=pct>80?'#FF3B30':pct>60?'#FF9500':'#34C759';
+  document.getElementById('cc-disk-pct').textContent=pct?`${pct}%`:'—';
+  document.getElementById('cc-disk-sub').textContent=d.disk_used?`${d.disk_used} / ${d.disk_total}`:'—';
+  document.getElementById('cc-disk').className='cc-tile'+(pct>80?' on-red':'');
+  // 헤더 배지
+  const sb=document.getElementById('sys-badge');
+  sb.textContent=(d.sdr1&&d.sdr2)?'SDR 연결됨':'SDR 확인 필요';
+  sb.className='badge '+((d.sdr1&&d.sdr2)?'b-green':'b-red');
+}
+
+function toast(d){
+  const w=document.getElementById('toasts');
+  const t=document.createElement('div');t.className='toast';
+  const ts=(d.timestamp||'').replace(/(\d{4})(\d\d)(\d\d)_(\d\d)(\d\d)(\d\d)/,'$2/$3 $4:$5:$6');
+  t.innerHTML=`<div><div class="toast-t">태양 전파 버스트 감지</div>
+<div class="toast-b">코히어런스 ${parseFloat(d.coherence).toFixed(4)} · ${ts}</div></div>`;
+  w.appendChild(t);setTimeout(()=>t.remove(),5100);
+}
+
+function webNotify(d){
+  if(!('Notification'in window))return;
+  const fn=()=>new Notification('태양 전파 버스트 감지',{
+    body:`코히어런스: ${parseFloat(d.coherence).toFixed(4)}\n시각: ${d.timestamp}`});
+  if(Notification.permission==='granted')fn();
+  else if(Notification.permission!=='denied')
+    Notification.requestPermission().then(p=>{if(p==='granted')fn();});
+}
+
+/* ── Spectrum chart ──────────────────────────── */
+const specCtx = document.getElementById('spec-chart').getContext('2d');
+const specData = {
+  labels: [],
+  datasets: [{
+    data: [],
+    borderColor: '#30D158',
+    borderWidth: 1.5,
+    pointRadius: 0,
+    fill: false,
+    tension: 0,
+  }]
+};
+const specChart = new Chart(specCtx, {
+  type: 'line', data: specData,
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    animation: false,
+    plugins: {
+      legend: {display: false},
+      tooltip: {
+        backgroundColor:'rgba(255,255,255,.97)',borderColor:'rgba(0,0,0,.08)',
+        borderWidth:.5,titleColor:'#8e8e93',bodyColor:'#1c1c1e',padding:9,
+        callbacks: {
+          title: items => `${parseFloat(items[0].label).toFixed(3)} MHz`,
+          label: c => `${c.raw.toFixed(1)} dBFS`
+        }
+      }
+    },
+    scales: {
+      x: {
+        grid: {color: 'rgba(0,0,0,.05)'},
+        ticks: {color:'#8e8e93', font:{size:9}, maxTicksLimit:7, maxRotation:0,
+                callback: v => parseFloat(specData.labels[v])?.toFixed(1)}
+      },
+      y: {
+        grid: {color: 'rgba(0,0,0,.05)'},
+        ticks: {color:'#8e8e93', font:{size:9}},
+        title: {display:true, text:'Power (dBFS)', color:'#8e8e93', font:{size:9}}
+      }
+    }
+  }
+});
+
+function updateSpectrum(d) {
+  if (!d.freqs || !d.freqs.length) return;
+  specData.labels = d.freqs;
+  specData.datasets[0].data = d.power;
+  specChart.update();
+  const b = document.getElementById('fig-badge');
+  if (document.getElementById('tab-spec-btn').classList.contains('tab-on')) {
+    const now = new Date();
+    b.textContent = `${String(now.getUTCHours()).padStart(2,'0')}:${String(now.getUTCMinutes()).padStart(2,'0')} UTC`;
+    b.className = 'badge b-green';
+  }
+  document.getElementById('spec-busy').style.display = 'none';
+}
+
+function switchTab(tab) {
+  const isFig = tab === 'fig';
+  document.getElementById('panel-fig').style.display  = isFig ? '' : 'none';
+  document.getElementById('panel-spec').style.display = isFig ? 'none' : '';
+  document.getElementById('tab-fig-btn').className  = 'tab-btn' + (isFig ? ' tab-on' : '');
+  document.getElementById('tab-spec-btn').className = 'tab-btn' + (!isFig ? ' tab-on' : '');
+  const b = document.getElementById('fig-badge');
+  if (!isFig) {
+    b.textContent = specData.labels.length ? '실시간' : '대기중';
+    b.className = 'badge ' + (specData.labels.length ? 'b-green' : 'b-gray');
+  } else {
+    b.textContent = '대기중'; b.className = 'badge b-gray';
+  }
+}
+
+/* ── 중복 방지: 이미 추가한 timestamp 추적 ─────── */
+function updateLastTs(ts) {
+  const el = document.getElementById('last-ts');
+  if (!el || !ts) return;
+  el.dataset.ts = ts;
+  const diff = Math.floor((Date.now() - parseTs(ts)) / 1000);
+  if (diff < 60) el.textContent = diff + '초 전';
+  else if (diff < 3600) el.textContent = Math.floor(diff/60) + '분 전';
+  else el.textContent = Math.floor(diff/3600) + '시간 전';
+  el.style.color = diff > 300 ? '#FF9500' : '#34C759';
+}
+setInterval(()=>{
+  const el = document.getElementById('last-ts');
+  if(el && el.dataset.ts) updateLastTs(el.dataset.ts);
+}, 30000);
+
+const seenTs = new Set();
+
+function addNewPoint(e, redraw) {
+  if (seenTs.has(e.timestamp)) return;
+  seenTs.add(e.timestamp);
+  addPoint(e, redraw);
+  addLog(e, true);
+  updateLastTs(e.timestamp);
+}
+
+/* ── Socket events ───────────────────────────── */
+socket.on('coherence_update', e => addNewPoint(e, true));
+socket.on('log_update',       ()=>{});  // coherence_update에서 통합 처리
+socket.on('burst_alert',      d=>{toast(d);webNotify(d);});
+socket.on('status_update',    d=>{
+  setStatus(d);
+  document.getElementById('spec-busy').style.display =
+    (!d.service_active && !d.recording) ? '' : 'none';
+});
+socket.on('spectrum_update',  d=>updateSpectrum(d));
+socket.on('figure_update',    d=>setFigure(d.filename));
+
+socket.on('disconnect', ()=> console.log('socket disconnected'));
+socket.on('reconnect',  ()=> poll());
+
+/* ── Polling: 20초마다 서버와 동기화 ────────────── */
+function poll() {
+  fetch('/api/history').then(r=>r.json()).then(data=>{
+    let added = false;
+    data.forEach(e=>{
+      if (seenTs.has(e.timestamp)) return;
+      seenTs.add(e.timestamp);
+      addPoint(e, false);
+      addLog(e, true);
+      added = true;
+    });
+    if (added) chart.update();
+  }).catch(()=>{});
+
+  fetch('/api/latest_figure').then(r=>r.json()).then(d=>{
+    if (d.filename) setFigure(d.filename);
+  }).catch(()=>{});
+}
+
+setInterval(poll, 20000);
+
+/* ── Init: load history ──────────────────────── */
+fetch('/api/history').then(r=>r.json()).then(data=>{
+  data.forEach(e=>{
+    seenTs.add(e.timestamp);
+    addPoint(e, false);
+  });
+  if(data.length) updateLastTs(data[data.length-1].timestamp);
+  chart.update();
+});
+fetch('/api/logs').then(r=>r.json()).then(data=>{
+  data.forEach(e=>addLog(e,false));
+});
+fetch('/api/spectrum').then(r=>r.json()).then(d=>updateSpectrum(d));
+fetch('/api/latest_figure').then(r=>r.json()).then(d=>{
+  if(d.filename)setFigure(d.filename);
+});
+
+/* ── 기본 탭: 실시간 스펙트럼 ───────────────── */
+switchTab('spec');
+
+/* ── CSV 다운로드 ────────────────────────────── */
+function downloadCSV() {
+  fetch('/api/history').then(r=>r.json()).then(data=>{
+    if(!data.length){alert('다운로드할 데이터가 없습니다.');return;}
+    const rows=['timestamp,coherence,burst'];
+    data.forEach(e=>rows.push([e.timestamp,e.coherence,e.burst?1:0].join(',')));
+    const blob=new Blob([rows.join('\n')],{type:'text/csv;charset=utf-8;'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=url;
+    a.download='solar_log_'+new Date().toISOString().slice(0,10)+'.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+}
+
+/* ── Request notification permission ────────── */
+if('Notification'in window&&Notification.permission==='default')
+  Notification.requestPermission();
+
+/* ── Clock (UTC) ─────────────────────────────── */
+setInterval(()=>{
+  const n=new Date();
+  const hh=String(n.getUTCHours()).padStart(2,'0');
+  const mm=String(n.getUTCMinutes()).padStart(2,'0');
+  const ss=String(n.getUTCSeconds()).padStart(2,'0');
+  document.getElementById('clock').textContent=`${hh}:${mm}:${ss} UTC`;
+},1000);
+
+/* ── Password Modal ──────────────────────────── */
+let pendingAction = null;
+
+function openModal(action) {
+  pendingAction = action;
+  const isStart = action === 'start';
+  document.getElementById('modal-title').textContent = isStart ? '측정 시작' : '측정 정지';
+  document.getElementById('modal-sub').textContent = isStart
+    ? 'solar_record 서비스를 시작합니다.'
+    : 'solar_record 서비스를 정지합니다.';
+  document.getElementById('modal-confirm').style.background = isStart ? '#34C759' : '#FF3B30';
+  document.getElementById('pw-input').value = '';
+  document.getElementById('pw-input').className = 'pw-input';
+  document.getElementById('pw-err').textContent = '';
+  document.getElementById('modal-confirm').disabled = false;
+  document.getElementById('modal-confirm').textContent = '확인';
+  document.getElementById('pw-modal').style.display = 'flex';
+  setTimeout(()=>document.getElementById('pw-input').focus(), 60);
+}
+
+function closeModal() {
+  document.getElementById('pw-modal').style.display = 'none';
+  pendingAction = null;
+}
+
+function submitControl() {
+  const pw = document.getElementById('pw-input').value;
+  const btn = document.getElementById('modal-confirm');
+  btn.disabled = true;
+  btn.textContent = '처리중…';
+
+  fetch('/api/control', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({action: pendingAction, password: pw})
+  })
+  .then(r => r.json().then(d => ({ok: r.ok, data: d})))
+  .then(({ok, data}) => {
+    if (data.ok) {
+      closeModal();
+    } else {
+      document.getElementById('pw-input').className = 'pw-input err';
+      document.getElementById('pw-err').textContent = data.error || '오류가 발생했습니다';
+      btn.disabled = false;
+      btn.textContent = '확인';
+      document.getElementById('pw-input').focus();
+    }
+  })
+  .catch(()=>{
+    document.getElementById('pw-err').textContent = '서버 연결 오류';
+    btn.disabled = false;
+    btn.textContent = '확인';
+  });
+}
+
+document.getElementById('pw-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') submitControl();
+  if (e.key === 'Escape') closeModal();
+});
+
+document.getElementById('pw-modal').addEventListener('click', e => {
+  if (e.target === document.getElementById('pw-modal')) closeModal();
+});
+</script>
+</body>
+</html>
